@@ -1,0 +1,34 @@
+[project]
+name = "polymarket-btc-5m-edge"
+version = "0.1.0"
+description = "Production-ready MVP for paper-first Polymarket BTC 5m Up/Down strategy research."
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9",
+    "aiogram>=3.4",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["data*", "tests*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
