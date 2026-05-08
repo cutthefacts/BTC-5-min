@@ -58,26 +58,71 @@ class BtcPriceStore:
 
 
 class BinanceBtcWebSocket:
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, fallback_url: str = "") -> None:
         self.url = url
+        self.fallback_url = fallback_url
+
+    def _parse_binance_trade(self, raw: str) -> BtcTick:
+        payload = json.loads(raw)
+        price = float(payload.get("p") or payload.get("price"))
+        ts_ms = int(payload.get("T") or payload.get("E") or 0)
+        timestamp = datetime.fromtimestamp(ts_ms / 1000, tz=UTC) if ts_ms else datetime.now(UTC)
+        return BtcTick(price=price, timestamp=timestamp)
+
+    def _parse_coinbase_ticker(self, raw: str) -> BtcTick | None:
+        payload = json.loads(raw)
+        if payload.get("type") != "ticker":
+            return None
+        price = payload.get("price")
+        if price is None:
+            return None
+        timestamp_raw = payload.get("time")
+        timestamp = (
+            datetime.fromisoformat(timestamp_raw.replace("Z", "+00:00"))
+            if timestamp_raw
+            else datetime.now(UTC)
+        )
+        return BtcTick(price=float(price), timestamp=timestamp)
+
+    async def _binance_stream(self) -> AsyncIterator[BtcTick]:
+        async with websockets.connect(self.url, ping_interval=20, ping_timeout=20) as ws:
+            async for raw in ws:
+                yield self._parse_binance_trade(raw)
+
+    async def _coinbase_stream(self) -> AsyncIterator[BtcTick]:
+        async with websockets.connect(self.fallback_url, ping_interval=20, ping_timeout=20) as ws:
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "subscribe",
+                        "product_ids": ["BTC-USD"],
+                        "channels": ["ticker"],
+                    }
+                )
+            )
+            async for raw in ws:
+                tick = self._parse_coinbase_ticker(raw)
+                if tick is not None:
+                    yield tick
 
     async def stream(self) -> AsyncIterator[BtcTick]:
         backoff = 1.0
+        source = "binance"
         while True:
             try:
-                async with websockets.connect(self.url, ping_interval=20, ping_timeout=20) as ws:
-                    backoff = 1.0
-                    async for raw in ws:
-                        payload = json.loads(raw)
-                        price = float(payload.get("p") or payload.get("price"))
-                        ts_ms = int(payload.get("T") or payload.get("E") or 0)
-                        timestamp = (
-                            datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
-                            if ts_ms
-                            else datetime.now(UTC)
-                        )
-                        yield BtcTick(price=price, timestamp=timestamp)
+                stream = self._coinbase_stream() if source == "coinbase" else self._binance_stream()
+                backoff = 1.0
+                async for tick in stream:
+                    yield tick
             except Exception as exc:
-                log.warning("Binance websocket disconnected: %s", exc)
+                if source == "binance" and self.fallback_url and "451" in str(exc):
+                    source = "coinbase"
+                    backoff = 1.0
+                    log.warning(
+                        "Binance websocket blocked (%s); switching BTC feed to Coinbase",
+                        exc,
+                    )
+                else:
+                    log.warning("%s websocket disconnected: %s", source.capitalize(), exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)

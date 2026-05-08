@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     polymarket_api_passphrase: str = ""
 
     binance_ws_url: str = "wss://stream.binance.com:9443/ws/btcusdt@trade"
+    btc_price_fallback_ws_url: str = "wss://ws-feed.exchange.coinbase.com"
 
     chainlink_reference_enabled: bool = False
     chainlink_reference_url: str = ""
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_admin_ids: str = ""
+    telegram_polling_enabled: bool = True
     live_confirmation_phrase: str = "ENABLE_LIVE_TRADING"
 
     paper_starting_balance: float = 1_000.0

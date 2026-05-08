@@ -72,8 +72,11 @@ class TradingService:
             asyncio.create_task(self._supervise("polymarket_ws", self._polymarket_ws_loop)),
             asyncio.create_task(self._supervise("signals", self._signal_loop)),
             asyncio.create_task(self._supervise("settlement", self._settlement_loop)),
-            asyncio.create_task(self._supervise("telegram", self.telegram.run)),
         ]
+        if self.settings.telegram_polling_enabled:
+            tasks.append(asyncio.create_task(self._supervise("telegram", self.telegram.run)))
+        else:
+            log.info("Telegram polling disabled by TELEGRAM_POLLING_ENABLED=false")
         await asyncio.gather(*tasks)
 
     async def _supervise(self, name: str, factory) -> None:
@@ -113,7 +116,10 @@ class TradingService:
             await asyncio.sleep(self.settings.market_refresh_seconds)
 
     async def _btc_loop(self) -> None:
-        async for tick in BinanceBtcWebSocket(self.settings.binance_ws_url).stream():
+        async for tick in BinanceBtcWebSocket(
+            self.settings.binance_ws_url,
+            self.settings.btc_price_fallback_ws_url,
+        ).stream():
             self.btc_store.add(tick)
             self.store.save_btc_tick(tick.timestamp.isoformat(), tick.price)
 
