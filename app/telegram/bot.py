@@ -104,6 +104,11 @@ class TelegramController:
         async def edge_quality_cmd(message: Message) -> None:
             await message.answer(self._edge_quality_text(), reply_markup=self._keyboard())
 
+        @self.router.message(Command("export_stats"))
+        async def export_stats_cmd(message: Message) -> None:
+            for chunk in self._split_message(self._export_stats_text()):
+                await message.answer(chunk)
+
         @self.router.message(Command("pause"))
         async def pause(message: Message) -> None:
             if not self._authorized(message):
@@ -184,6 +189,8 @@ class TelegramController:
             return self._candidate_text()
         if data == "shadow_stats":
             return self._shadow_text()
+        if data == "export_stats":
+            return self._export_stats_text()
         if data in {"pause", "resume", "kill", "mode_paper", "mode_live"} and (
             not self._authorized_callback(query)
         ):
@@ -232,6 +239,7 @@ class TelegramController:
                     InlineKeyboardButton(text="Candidate", callback_data="candidate"),
                     InlineKeyboardButton(text="Shadow", callback_data="shadow_stats"),
                 ],
+                [InlineKeyboardButton(text="Export stats", callback_data="export_stats")],
                 [
                     InlineKeyboardButton(text="Pause", callback_data="pause"),
                     InlineKeyboardButton(text="Resume", callback_data="resume"),
@@ -309,6 +317,69 @@ class TelegramController:
                 f"size={row['size']:.2f} stale={bool(row['stale_fill'])}"
             )
         return "\n".join(lines)
+
+    def _export_stats_text(self) -> str:
+        strategy_name = "candidate_v1"
+        trades = self.store.strategy_trade_summary(strategy_name)
+        settled = self.store.strategy_settled_summary(strategy_name)
+        pf = settled["profit_factor"]
+        pf_text = f"{pf:.2f}" if pf is not None else "n/a"
+        lines = [
+            "candidate_v1 export",
+            f"trades={trades['trades']:.0f} latest={trades['latest_trade_at']}",
+            f"notional_spent={trades['notional_spent']:.2f}",
+            f"avg_edge={trades['avg_edge']:.4f} stale={trades['stale_fill_rate']:.2%}",
+            (
+                f"settled_markets={settled['settled_markets']} "
+                f"settled_trades={settled['settled_trades']} "
+                f"pnl={settled['pnl']:.2f} pf={pf_text} "
+                f"winrate={settled['winrate']:.2%} dd={settled['max_drawdown']:.2f}"
+            ),
+            "",
+            "side pnl:",
+        ]
+        side_rows = self.store.strategy_side_pnl(strategy_name)
+        if side_rows:
+            for row in side_rows:
+                lines.append(
+                    f"{row['side']}: trades={row['trades']} pnl={row['pnl']:.2f} "
+                    f"avg_edge={row['avg_edge'] or 0:.4f} "
+                    f"stale={row['stale_fill_rate'] or 0:.2%}"
+                )
+        else:
+            lines.append("no settled side pnl yet")
+
+        lines.extend(["", "regime signals:"])
+        for row in self.store.strategy_regime_signal_counts(strategy_name):
+            confidence = row["avg_confidence"]
+            avg_edge = row["avg_edge"]
+            lines.append(
+                f"{row['regime']}:{row['regime_source']} signals={row['signals']} "
+                f"conf={(confidence or 0):.2f} edge={(avg_edge or 0):.4f}"
+            )
+
+        lines.extend(["", "last trades:"])
+        for row in self.store.last_trades(strategy_name, 10):
+            lines.append(
+                f"{row['timestamp']} {row['outcome']} price={row['price']:.3f} "
+                f"size={row['size']:.2f} fee={row['fee']:.4f} "
+                f"stale={bool(row['stale_fill'])}"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _split_message(text: str, limit: int = 3900) -> list[str]:
+        chunks: list[str] = []
+        current = ""
+        for line in text.splitlines():
+            if len(current) + len(line) + 1 > limit:
+                chunks.append(current)
+                current = line
+            else:
+                current = f"{current}\n{line}" if current else line
+        if current:
+            chunks.append(current)
+        return chunks
 
     def _regime_text(self) -> str:
         regime = MarketRegimeEngine().classify_values(0, 0, 0, 0, 0, 0, 0).regime

@@ -128,6 +128,64 @@ def test_strategy_name_is_stored_for_signal_and_trade(tmp_path) -> None:
     assert summary["trades"] == 1
 
 
+def test_strategy_export_summaries(tmp_path) -> None:
+    store = SQLiteStore(f"sqlite:///{tmp_path / 'test.sqlite3'}")
+    store.init()
+    now = datetime.now(UTC)
+    market = Market(
+        condition_id="m1",
+        question="BTC Up Down 5m",
+        slug="btc-updown-5m-1",
+        start_time=now - timedelta(minutes=5),
+        end_time=now,
+        price_to_beat=100,
+        up_token_id="up",
+        down_token_id="down",
+    )
+    store.save_market(market)
+    store.save_signal(
+        Signal(
+            market_id="m1",
+            action=SignalAction.BUY_UP,
+            outcome=Outcome.UP,
+            expected_probability=0.6,
+            market_probability=0.5,
+            edge=0.1,
+            strength=0.8,
+            reason="test",
+            strategy_name="candidate_v1",
+            regime="compression",
+            regime_source="snapshot",
+            regime_confidence=0.8,
+            expected_edge=0.1,
+        )
+    )
+    store.save_trade(
+        Trade(
+            order_id="o1",
+            market_id="m1",
+            token_id="up",
+            outcome=Outcome.UP,
+            price=0.5,
+            size=1,
+            fee=0.01,
+            expected_edge=0.1,
+            strategy_name="candidate_v1",
+        )
+    )
+    candidate = store.settlement_candidates((now + timedelta(seconds=20)).isoformat())[0]
+    store.settle_market(candidate, 101, now.isoformat(), "binance")
+
+    settled = store.strategy_settled_summary("candidate_v1")
+    side_rows = store.strategy_side_pnl("candidate_v1")
+    regime_rows = store.strategy_regime_signal_counts("candidate_v1")
+
+    assert settled["settled_trades"] == 1
+    assert side_rows[0]["side"] == "UP"
+    assert round(side_rows[0]["pnl"], 2) == 0.49
+    assert regime_rows[0]["regime"] == "compression"
+
+
 def test_signal_snapshot_columns_are_nullable(tmp_path) -> None:
     store = SQLiteStore(f"sqlite:///{tmp_path / 'test.sqlite3'}")
     store.init()

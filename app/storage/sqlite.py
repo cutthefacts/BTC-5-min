@@ -774,6 +774,86 @@ class SQLiteStore:
                 ).fetchall()
             )
 
+    def strategy_settled_summary(self, strategy_name: str) -> dict[str, float | int | None]:
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                select settled_at, pnl, trade_count, settlement_source
+                from results
+                where trade_count > 0
+                  and coalesce(strategy_name, 'baseline') in (?, 'mixed')
+                order by settled_at asc
+                """,
+                (strategy_name,),
+            ).fetchall()
+        total_pnl = sum(float(row["pnl"]) for row in rows)
+        wins = sum(1 for row in rows if float(row["pnl"]) > 0)
+        gross_profit = sum(float(row["pnl"]) for row in rows if float(row["pnl"]) > 0)
+        gross_loss = -sum(float(row["pnl"]) for row in rows if float(row["pnl"]) < 0)
+        trade_count = sum(int(row["trade_count"]) for row in rows)
+        equity = 0.0
+        high_water = 0.0
+        max_drawdown = 0.0
+        for row in rows:
+            equity += float(row["pnl"])
+            high_water = max(high_water, equity)
+            max_drawdown = max(max_drawdown, high_water - equity)
+        return {
+            "settled_markets": len(rows),
+            "settled_trades": trade_count,
+            "pnl": total_pnl,
+            "winrate": wins / len(rows) if rows else 0.0,
+            "profit_factor": gross_profit / gross_loss if gross_loss > 0 else None,
+            "max_drawdown": max_drawdown,
+        }
+
+    def strategy_side_pnl(self, strategy_name: str) -> list[sqlite3.Row]:
+        with self._lock:
+            return list(
+                self.conn.execute(
+                    """
+                    select t.outcome as side,
+                           count(*) as trades,
+                           sum(
+                               case when t.outcome = r.winning_outcome then t.size else 0 end
+                               - (t.price * t.size + t.fee)
+                           ) as pnl,
+                           avg(t.expected_edge) as avg_edge,
+                           avg(coalesce(t.stale_fill, 0)) as stale_fill_rate
+                    from trades t
+                    join results r on r.market_id = t.market_id
+                    where coalesce(t.strategy_name, 'baseline') = ?
+                    group by t.outcome
+                    order by pnl desc
+                    """,
+                    (strategy_name,),
+                ).fetchall()
+            )
+
+    def strategy_regime_signal_counts(
+        self,
+        strategy_name: str,
+        limit: int = 5,
+    ) -> list[sqlite3.Row]:
+        with self._lock:
+            return list(
+                self.conn.execute(
+                    """
+                    select coalesce(regime, 'missing') as regime,
+                           coalesce(regime_source, 'missing') as regime_source,
+                           count(*) as signals,
+                           avg(regime_confidence) as avg_confidence,
+                           avg(expected_edge) as avg_edge
+                    from signals
+                    where coalesce(strategy_name, 'baseline') = ?
+                    group by coalesce(regime, 'missing'), coalesce(regime_source, 'missing')
+                    order by signals desc
+                    limit ?
+                    """,
+                    (strategy_name, limit),
+                ).fetchall()
+            )
+
     def settlement_candidates(self, cutoff_iso: str) -> list[sqlite3.Row]:
         with self._lock:
             return list(
