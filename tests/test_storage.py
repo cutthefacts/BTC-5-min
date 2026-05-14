@@ -210,6 +210,34 @@ def test_database_diagnostics_reports_counts_and_strategies(tmp_path) -> None:
     assert diagnostics["signal_strategies"] == [("candidate_v1", 1)]
 
 
+def test_strategy_signal_breakdown(tmp_path) -> None:
+    store = SQLiteStore(f"sqlite:///{tmp_path / 'test.sqlite3'}")
+    store.init()
+    store.save_signal(
+        Signal(
+            market_id="m1",
+            action=SignalAction.HOLD,
+            outcome=Outcome.UP,
+            expected_probability=0.6,
+            market_probability=0.5,
+            edge=0.1,
+            strength=0.8,
+            reason="entry_window_blocked",
+            strategy_name="candidate_v1",
+            expected_edge=0.1,
+            confidence=0.7,
+            inefficiency_score=0.6,
+            quote_age_ms=500,
+            repricing_lag_ms=500,
+        )
+    )
+
+    rows = store.strategy_signal_breakdown("candidate_v1")
+
+    assert rows[0]["reason"] == "entry_window_blocked"
+    assert rows[0]["signals"] == 1
+
+
 def test_signal_snapshot_columns_are_nullable(tmp_path) -> None:
     store = SQLiteStore(f"sqlite:///{tmp_path / 'test.sqlite3'}")
     store.init()

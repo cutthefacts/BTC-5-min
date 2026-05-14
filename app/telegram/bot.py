@@ -113,6 +113,10 @@ class TelegramController:
         async def db_status_cmd(message: Message) -> None:
             await message.answer(self._db_status_text())
 
+        @self.router.message(Command("signal_stats"))
+        async def signal_stats_cmd(message: Message) -> None:
+            await message.answer(self._signal_stats_text())
+
         @self.router.message(Command("pause"))
         async def pause(message: Message) -> None:
             if not self._authorized(message):
@@ -197,6 +201,8 @@ class TelegramController:
             return self._export_stats_text()
         if data == "db_status":
             return self._db_status_text()
+        if data == "signal_stats":
+            return self._signal_stats_text()
         if data in {"pause", "resume", "kill", "mode_paper", "mode_live"} and (
             not self._authorized_callback(query)
         ):
@@ -249,6 +255,7 @@ class TelegramController:
                     InlineKeyboardButton(text="Export stats", callback_data="export_stats"),
                     InlineKeyboardButton(text="DB status", callback_data="db_status"),
                 ],
+                [InlineKeyboardButton(text="Signal stats", callback_data="signal_stats")],
                 [
                     InlineKeyboardButton(text="Pause", callback_data="pause"),
                     InlineKeyboardButton(text="Resume", callback_data="resume"),
@@ -403,6 +410,24 @@ class TelegramController:
             lines.extend(f"{name}: {count}" for name, count in trade_strategies)
         else:
             lines.append("none")
+        return "\n".join(lines)
+
+    def _signal_stats_text(self) -> str:
+        rows = self.store.strategy_signal_breakdown("candidate_v1")
+        lines = ["candidate_v1 signal stats"]
+        if not rows:
+            lines.append("no signals")
+            return "\n".join(lines)
+        for row in rows:
+            lines.append(
+                f"{row['action']} {row['outcome']} {row['reason']}: n={row['signals']} "
+                f"edge={(row['avg_expected_edge'] or 0):.4f} "
+                f"score={(row['avg_inefficiency_score'] or 0):.3f} "
+                f"conf={(row['avg_confidence'] or 0):.3f} "
+                f"stc={(row['avg_seconds_to_close'] or 0):.1f}s "
+                f"qage={(row['avg_quote_age_ms'] or 0):.0f}ms "
+                f"lag={(row['avg_repricing_lag_ms'] or 0):.0f}ms"
+            )
         return "\n".join(lines)
 
     @staticmethod

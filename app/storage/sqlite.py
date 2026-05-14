@@ -897,6 +897,31 @@ class SQLiteStore:
                 ).fetchall()
             )
 
+    def strategy_signal_breakdown(self, strategy_name: str, limit: int = 12) -> list[sqlite3.Row]:
+        with self._lock:
+            return list(
+                self.conn.execute(
+                    """
+                    select action,
+                           reason,
+                           coalesce(outcome, 'NONE') as outcome,
+                           count(*) as signals,
+                           avg(expected_edge) as avg_expected_edge,
+                           avg(inefficiency_score) as avg_inefficiency_score,
+                           avg(confidence) as avg_confidence,
+                           avg(seconds_to_close) as avg_seconds_to_close,
+                           avg(quote_age_ms) as avg_quote_age_ms,
+                           avg(repricing_lag_ms) as avg_repricing_lag_ms
+                    from signals
+                    where coalesce(strategy_name, 'baseline') = ?
+                    group by action, reason, coalesce(outcome, 'NONE')
+                    order by signals desc
+                    limit ?
+                    """,
+                    (strategy_name, limit),
+                ).fetchall()
+            )
+
     def settlement_candidates(self, cutoff_iso: str) -> list[sqlite3.Row]:
         with self._lock:
             return list(
