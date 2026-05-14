@@ -186,6 +186,30 @@ def test_strategy_export_summaries(tmp_path) -> None:
     assert regime_rows[0]["regime"] == "compression"
 
 
+def test_database_diagnostics_reports_counts_and_strategies(tmp_path) -> None:
+    store = SQLiteStore(f"sqlite:///{tmp_path / 'test.sqlite3'}")
+    store.init()
+    store.save_signal(
+        Signal(
+            market_id="m1",
+            action=SignalAction.HOLD,
+            outcome=None,
+            expected_probability=0,
+            market_probability=0,
+            edge=0,
+            strength=0,
+            reason="test",
+            strategy_name="candidate_v1",
+        )
+    )
+
+    diagnostics = store.database_diagnostics()
+
+    assert diagnostics["exists"] is True
+    assert diagnostics["counts"]["signals"] == 1
+    assert diagnostics["signal_strategies"] == [("candidate_v1", 1)]
+
+
 def test_signal_snapshot_columns_are_nullable(tmp_path) -> None:
     store = SQLiteStore(f"sqlite:///{tmp_path / 'test.sqlite3'}")
     store.init()

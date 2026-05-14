@@ -712,6 +712,7 @@ class SQLiteStore:
             "data_quality_events",
             "missed_opportunities",
             "optimization_runs",
+            "results",
         )
         with self._lock:
             return {
@@ -720,6 +721,48 @@ class SQLiteStore:
                 )
                 for table in tables
             }
+
+    def database_diagnostics(self) -> dict[str, Any]:
+        counts = self.table_counts()
+        with self._lock:
+            signal_range = self.conn.execute(
+                "select min(timestamp) as first_at, max(timestamp) as latest_at from signals"
+            ).fetchone()
+            trade_range = self.conn.execute(
+                "select min(timestamp) as first_at, max(timestamp) as latest_at from trades"
+            ).fetchone()
+            signal_strategies = self.conn.execute(
+                """
+                select coalesce(strategy_name, 'baseline') as strategy_name, count(*) as n
+                from signals
+                group by coalesce(strategy_name, 'baseline')
+                order by n desc
+                """
+            ).fetchall()
+            trade_strategies = self.conn.execute(
+                """
+                select coalesce(strategy_name, 'baseline') as strategy_name, count(*) as n
+                from trades
+                group by coalesce(strategy_name, 'baseline')
+                order by n desc
+                """
+            ).fetchall()
+        return {
+            "path": str(self.path),
+            "exists": self.path.exists(),
+            "size_bytes": self.path.stat().st_size if self.path.exists() else 0,
+            "counts": counts,
+            "signal_first_at": signal_range["first_at"],
+            "signal_latest_at": signal_range["latest_at"],
+            "trade_first_at": trade_range["first_at"],
+            "trade_latest_at": trade_range["latest_at"],
+            "signal_strategies": [
+                (row["strategy_name"], int(row["n"])) for row in signal_strategies
+            ],
+            "trade_strategies": [
+                (row["strategy_name"], int(row["n"])) for row in trade_strategies
+            ],
+        }
 
     def trade_summary(self) -> dict[str, float | str | None]:
         with self._lock:

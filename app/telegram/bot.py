@@ -109,6 +109,10 @@ class TelegramController:
             for chunk in self._split_message(self._export_stats_text()):
                 await message.answer(chunk)
 
+        @self.router.message(Command("db_status"))
+        async def db_status_cmd(message: Message) -> None:
+            await message.answer(self._db_status_text())
+
         @self.router.message(Command("pause"))
         async def pause(message: Message) -> None:
             if not self._authorized(message):
@@ -191,6 +195,8 @@ class TelegramController:
             return self._shadow_text()
         if data == "export_stats":
             return self._export_stats_text()
+        if data == "db_status":
+            return self._db_status_text()
         if data in {"pause", "resume", "kill", "mode_paper", "mode_live"} and (
             not self._authorized_callback(query)
         ):
@@ -239,7 +245,10 @@ class TelegramController:
                     InlineKeyboardButton(text="Candidate", callback_data="candidate"),
                     InlineKeyboardButton(text="Shadow", callback_data="shadow_stats"),
                 ],
-                [InlineKeyboardButton(text="Export stats", callback_data="export_stats")],
+                [
+                    InlineKeyboardButton(text="Export stats", callback_data="export_stats"),
+                    InlineKeyboardButton(text="DB status", callback_data="db_status"),
+                ],
                 [
                     InlineKeyboardButton(text="Pause", callback_data="pause"),
                     InlineKeyboardButton(text="Resume", callback_data="resume"),
@@ -365,6 +374,35 @@ class TelegramController:
                 f"size={row['size']:.2f} fee={row['fee']:.4f} "
                 f"stale={bool(row['stale_fill'])}"
             )
+        return "\n".join(lines)
+
+    def _db_status_text(self) -> str:
+        data = self.store.database_diagnostics()
+        counts = data["counts"]
+        lines = [
+            "database status",
+            f"path={data['path']}",
+            f"exists={data['exists']} size_mb={data['size_bytes'] / 1_000_000:.2f}",
+            (
+                f"markets={counts['markets']} btc_ticks={counts['btc_ticks']} "
+                f"signals={counts['signals']} trades={counts['trades']} "
+                f"results={counts['results']}"
+            ),
+            f"signals first={data['signal_first_at']} latest={data['signal_latest_at']}",
+            f"trades first={data['trade_first_at']} latest={data['trade_latest_at']}",
+            "signal strategies:",
+        ]
+        signal_strategies = data["signal_strategies"] or []
+        if signal_strategies:
+            lines.extend(f"{name}: {count}" for name, count in signal_strategies)
+        else:
+            lines.append("none")
+        lines.append("trade strategies:")
+        trade_strategies = data["trade_strategies"] or []
+        if trade_strategies:
+            lines.extend(f"{name}: {count}" for name, count in trade_strategies)
+        else:
+            lines.append("none")
         return "\n".join(lines)
 
     @staticmethod
